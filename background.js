@@ -11,6 +11,7 @@
 const DEFAULT_SETTINGS = {
   showFloatingButton: true,
   showClipboardPill: true,
+  buttonIdle: true,
   floatingButtonSize: 'medium',
   floatingButtonPosition: 'top-right',
   floatingButtonMode: 'full',

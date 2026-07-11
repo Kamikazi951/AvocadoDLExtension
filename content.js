@@ -33,6 +33,8 @@
   let isDragArmed = false;
   let suppressButtonClick = false;
   let dismissedVideoElement = null;
+  let buttonIdleEnabled = true;
+  let mouseIdleTimer = null;
 
   function updateAttachedState() {
     if (!floatingBtn) return;
@@ -71,6 +73,7 @@
     if (!settings) return;
     showFloatingButton = settings.showFloatingButton !== false;
     showClipboardPillSetting = settings.showClipboardPill !== false;
+    buttonIdleEnabled = settings.buttonIdle !== false;
     floatingButtonSize = settings.floatingButtonSize || 'medium';
     floatingButtonPosition = settings.floatingButtonPosition || 'top-right';
     floatingButtonMode = settings.floatingButtonMode || 'full';
@@ -605,6 +608,11 @@
         will-change: transform;
         user-select: none;
         -webkit-user-select: none;
+        transition: opacity 0.6s ease;
+      }
+      .avocado-dl-bar.idle {
+        opacity: 0.25 !important;
+        animation: none !important;
       }
       .avocado-dl-bar.dragging {
         animation: none !important;
@@ -828,6 +836,7 @@
       document.removeEventListener('pointercancel', onPointerUp, true);
       armed = false;
       isDragArmed = false;
+      if (floatingBtn) floatingBtn.bar.classList.remove('idle');
 
       if (isDraggingButton) {
         isDraggingButton = false;
@@ -839,6 +848,8 @@
 
     function startPress(e) {
       if (e.button !== undefined && e.button !== 0) return;
+      if (mouseIdleTimer) { clearTimeout(mouseIdleTimer); mouseIdleTimer = null; }
+      if (floatingBtn) floatingBtn.bar.classList.remove('idle');
       armed = true;
       isDragArmed = true;
       startX = e.clientX;
@@ -860,6 +871,18 @@
   
   document.addEventListener('mousemove', (e) => {
     if (isDraggingButton || isDragArmed) return;
+
+    if (floatingBtn && floatingBtn.host.parentElement) {
+      floatingBtn.bar.classList.remove('idle');
+      if (mouseIdleTimer) clearTimeout(mouseIdleTimer);
+      if (buttonIdleEnabled) {
+        mouseIdleTimer = setTimeout(() => {
+          if (floatingBtn && floatingBtn.host.parentElement) {
+            floatingBtn.bar.classList.add('idle');
+          }
+        }, 4000);
+      }
+    }
 
     if (mouseMoveThrottle) return;
     mouseMoveThrottle = setTimeout(() => { mouseMoveThrottle = null; }, 66);
@@ -985,7 +1008,8 @@
   }
   
   function hideOverlayButton() {
-    if (isDraggingButton) return; // don't yank the button out mid-drag
+    if (isDraggingButton) return;
+    if (mouseIdleTimer) { clearTimeout(mouseIdleTimer); mouseIdleTimer = null; }
     if (floatingBtn && floatingBtn.host.parentElement) {
       floatingBtn.host.remove();
     }

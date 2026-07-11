@@ -6,8 +6,9 @@
   'use strict';
   
   const DEFAULT_SETTINGS = {
-    showFloatingButton: true,
-    showClipboardPill: true,
+  showFloatingButton: true,
+  showClipboardPill: true,
+  buttonIdle: true,
     floatingButtonSize: 'medium',
     floatingButtonPosition: 'top-right',
     floatingButtonMode: 'full',
@@ -21,6 +22,7 @@
   const floatingButtonSizeEl = document.getElementById('floating-button-size');
   const floatingButtonPositionEl = document.getElementById('floating-button-position');
   const clipboardPillEl = document.getElementById('clipboard-pill');
+  const buttonIdleEl = document.getElementById('button-idle');
   const toastEl = document.getElementById('toast');
 
   function getSelectedMode() {
@@ -40,6 +42,7 @@
       
       floatingButtonEl.checked = settings.showFloatingButton;
       clipboardPillEl.checked = settings.showClipboardPill !== false;
+      buttonIdleEl.checked = settings.buttonIdle !== false;
       floatingButtonSizeEl.value = settings.floatingButtonSize || 'medium';
       floatingButtonPositionEl.value = settings.floatingButtonPosition || 'top-right';
 
@@ -61,6 +64,7 @@
         ...(result.settings || {}),
         showFloatingButton: floatingButtonEl.checked,
         showClipboardPill: clipboardPillEl.checked,
+        buttonIdle: buttonIdleEl.checked,
         floatingButtonSize: floatingButtonSizeEl.value,
         floatingButtonPosition: floatingButtonPositionEl.value,
         floatingButtonMode: getSelectedMode(),
@@ -88,6 +92,7 @@
   
   floatingButtonEl.addEventListener('change', saveSettings);
   clipboardPillEl.addEventListener('change', saveSettings);
+  buttonIdleEl.addEventListener('change', saveSettings);
   floatingButtonSizeEl.addEventListener('change', saveSettings);
   floatingButtonPositionEl.addEventListener('change', saveSettings);
   floatingButtonModeEls.forEach((el) => el.addEventListener('change', saveSettings));
