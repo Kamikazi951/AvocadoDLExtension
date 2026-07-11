@@ -6,8 +6,11 @@
   'use strict';
   
   const DEFAULT_SETTINGS = {
-    showFloatingButton: true,
-    showClipboardPill: true,
+  showFloatingButton: true,
+  showClipboardPill: true,
+  buttonIdle: true,
+  idleOpacity: 0.25,
+  minVideoDuration: 0,
     floatingButtonSize: 'medium',
     floatingButtonPosition: 'top-right',
     floatingButtonMode: 'full',
@@ -21,6 +24,10 @@
   const floatingButtonSizeEl = document.getElementById('floating-button-size');
   const floatingButtonPositionEl = document.getElementById('floating-button-position');
   const clipboardPillEl = document.getElementById('clipboard-pill');
+  const buttonIdleEl = document.getElementById('button-idle');
+  const idleOpacityEl = document.getElementById('idle-opacity');
+  const idleOpacityValueEl = document.getElementById('idle-opacity-value');
+  const minVideoDurationEl = document.getElementById('min-video-duration');
   const toastEl = document.getElementById('toast');
 
   function getSelectedMode() {
@@ -40,6 +47,10 @@
       
       floatingButtonEl.checked = settings.showFloatingButton;
       clipboardPillEl.checked = settings.showClipboardPill !== false;
+      buttonIdleEl.checked = settings.buttonIdle !== false;
+      idleOpacityEl.value = Math.round((settings.idleOpacity || 0.25) * 100);
+      idleOpacityValueEl.textContent = idleOpacityEl.value + '%';
+      minVideoDurationEl.value = settings.minVideoDuration || 0;
       floatingButtonSizeEl.value = settings.floatingButtonSize || 'medium';
       floatingButtonPositionEl.value = settings.floatingButtonPosition || 'top-right';
 
@@ -61,6 +72,9 @@
         ...(result.settings || {}),
         showFloatingButton: floatingButtonEl.checked,
         showClipboardPill: clipboardPillEl.checked,
+        buttonIdle: buttonIdleEl.checked,
+        idleOpacity: parseInt(idleOpacityEl.value) / 100,
+        minVideoDuration: parseInt(minVideoDurationEl.value),
         floatingButtonSize: floatingButtonSizeEl.value,
         floatingButtonPosition: floatingButtonPositionEl.value,
         floatingButtonMode: getSelectedMode(),
@@ -88,6 +102,12 @@
   
   floatingButtonEl.addEventListener('change', saveSettings);
   clipboardPillEl.addEventListener('change', saveSettings);
+  buttonIdleEl.addEventListener('change', saveSettings);
+  idleOpacityEl.addEventListener('input', () => {
+    idleOpacityValueEl.textContent = idleOpacityEl.value + '%';
+    saveSettings();
+  });
+  minVideoDurationEl.addEventListener('change', saveSettings);
   floatingButtonSizeEl.addEventListener('change', saveSettings);
   floatingButtonPositionEl.addEventListener('change', saveSettings);
   floatingButtonModeEls.forEach((el) => el.addEventListener('change', saveSettings));

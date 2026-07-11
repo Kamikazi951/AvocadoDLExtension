@@ -11,6 +11,9 @@
 const DEFAULT_SETTINGS = {
   showFloatingButton: true,
   showClipboardPill: true,
+  buttonIdle: true,
+  idleOpacity: 0.25,
+  minVideoDuration: 0,
   floatingButtonSize: 'medium',
   floatingButtonPosition: 'top-right',
   floatingButtonMode: 'full',

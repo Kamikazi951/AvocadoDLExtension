@@ -105,11 +105,49 @@
         <span class="toggle-slider"></span>
       </label>
     </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <label>Auto-dim on idle</label>
+        <span class="setting-desc">Fade button when mouse stops</span>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="button-idle" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <label>Idle dim opacity</label>
+        <span class="setting-desc">Fade level when idle</span>
+      </div>
+      <div class="popup-range-wrapper">
+        <input type="range" id="idle-opacity" min="0" max="100" value="25" class="popup-range">
+        <span class="popup-range-value" id="idle-opacity-value">25%</span>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <label>Min video length</label>
+        <span class="setting-desc">Skip short videos</span>
+      </div>
+      <div class="setting-select-wrapper">
+        <select id="min-video-duration" class="setting-select">
+          <option value="0">Any</option>
+          <option value="10">10s</option>
+          <option value="30">30s</option>
+          <option value="60">1m</option>
+          <option value="120">2m</option>
+        </select>
+      </div>
+    </div>
   </div>
 
   <div class="popup-footer">
     <button id="btn-reset-position" class="footer-btn">Reset Position</button>
-    <span class="footer-version">v1.0.0</span>
+    <span class="footer-version">v1.1.0</span>
   </div>
 
   <script src="popup.js"></script>

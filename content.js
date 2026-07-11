@@ -33,13 +33,21 @@
   let isDragArmed = false;
   let suppressButtonClick = false;
   let dismissedVideoElement = null;
+  let buttonIdleEnabled = true;
+  let mouseIdleTimer = null;
+  let minVideoDuration = 0;
+  let idleOpacity = 0.25;
+  let dismissedKeys = new Set();
+
+  chrome.storage.session.get('dismissedKeys', (result) => {
+    if (result.dismissedKeys) dismissedKeys = new Set(result.dismissedKeys);
+  });
 
   function updateAttachedState() {
     if (!floatingBtn) return;
     const bar = floatingBtn.bar;
     if (!bar) return;
-    const isAttached = floatingButtonOffset.x === 0 && floatingButtonOffset.y === 0
-                       && floatingButtonPosition === 'top-right';
+    const isAttached = floatingButtonOffset.x === 0 && floatingButtonOffset.y === 0;
     bar.classList.toggle('attached', isAttached);
   }
 
@@ -59,6 +67,10 @@
     applyDragOffset();
   }
 
+  function saveDismissedKeys() {
+    chrome.storage.session.set({ dismissedKeys: [...dismissedKeys] });
+  }
+
   function applyDragOffset() {
     if (!floatingBtn) return;
     const bar = floatingBtn.bar;
@@ -71,10 +83,16 @@
     if (!settings) return;
     showFloatingButton = settings.showFloatingButton !== false;
     showClipboardPillSetting = settings.showClipboardPill !== false;
+    buttonIdleEnabled = settings.buttonIdle !== false;
+    minVideoDuration = settings.minVideoDuration || 0;
+    idleOpacity = (settings.idleOpacity !== undefined) ? settings.idleOpacity : 0.25;
     floatingButtonSize = settings.floatingButtonSize || 'medium';
     floatingButtonPosition = settings.floatingButtonPosition || 'top-right';
     floatingButtonMode = settings.floatingButtonMode || 'full';
     updateFloatingButtonStyles();
+    if (floatingBtn) {
+      floatingBtn.bar.style.setProperty('--idle-opacity', idleOpacity);
+    }
   }
 
   // Load settings on startup
@@ -605,6 +623,11 @@
         will-change: transform;
         user-select: none;
         -webkit-user-select: none;
+        transition: opacity 0.6s ease;
+      }
+      .avocado-dl-bar.idle {
+        opacity: var(--idle-opacity, 0.25) !important;
+        animation: none !important;
       }
       .avocado-dl-bar.dragging {
         animation: none !important;
@@ -615,15 +638,33 @@
       }
 
       .avocado-dl-bar.pos-top-right    { right: 0 !important; left: auto !important; bottom: auto !important; }
-      .avocado-dl-bar.pos-top-right.size-small   { top: -32px !important; }
-      .avocado-dl-bar.pos-top-right.size-medium  { top: -38px !important; }
-      .avocado-dl-bar.pos-top-right.size-large   { top: -44px !important; }
-      .avocado-dl-bar.pos-top-right.mode-mini.size-small  { top: -34px !important; }
-      .avocado-dl-bar.pos-top-right.mode-mini.size-medium { top: -44px !important; }
-      .avocado-dl-bar.pos-top-right.mode-mini.size-large  { top: -54px !important; }
-      .avocado-dl-bar.pos-top-left     { top: 14px !important; left: 14px !important; right: auto !important; bottom: auto !important; }
-      .avocado-dl-bar.pos-bottom-right { bottom: 14px !important; right: 14px !important; top: auto !important; left: auto !important; }
-      .avocado-dl-bar.pos-bottom-left  { bottom: 14px !important; left: 14px !important; top: auto !important; right: auto !important; }
+      .avocado-dl-bar.pos-top-right.size-small   { top: -26px !important; }
+      .avocado-dl-bar.pos-top-right.size-medium  { top: -32px !important; }
+      .avocado-dl-bar.pos-top-right.size-large   { top: -38px !important; }
+      .avocado-dl-bar.pos-top-right.mode-mini.size-small  { top: -28px !important; }
+      .avocado-dl-bar.pos-top-right.mode-mini.size-medium { top: -34px !important; }
+      .avocado-dl-bar.pos-top-right.mode-mini.size-large  { top: -44px !important; }
+      .avocado-dl-bar.pos-top-left     { left: 0 !important; right: auto !important; bottom: auto !important; }
+      .avocado-dl-bar.pos-top-left.size-small   { top: -26px !important; }
+      .avocado-dl-bar.pos-top-left.size-medium  { top: -32px !important; }
+      .avocado-dl-bar.pos-top-left.size-large   { top: -38px !important; }
+      .avocado-dl-bar.pos-top-left.mode-mini.size-small  { top: -28px !important; }
+      .avocado-dl-bar.pos-top-left.mode-mini.size-medium { top: -34px !important; }
+      .avocado-dl-bar.pos-top-left.mode-mini.size-large  { top: -44px !important; }
+      .avocado-dl-bar.pos-bottom-right { right: 0 !important; left: auto !important; top: auto !important; }
+      .avocado-dl-bar.pos-bottom-right.size-small   { bottom: -26px !important; }
+      .avocado-dl-bar.pos-bottom-right.size-medium  { bottom: -32px !important; }
+      .avocado-dl-bar.pos-bottom-right.size-large   { bottom: -38px !important; }
+      .avocado-dl-bar.pos-bottom-right.mode-mini.size-small  { bottom: -28px !important; }
+      .avocado-dl-bar.pos-bottom-right.mode-mini.size-medium { bottom: -34px !important; }
+      .avocado-dl-bar.pos-bottom-right.mode-mini.size-large  { bottom: -44px !important; }
+      .avocado-dl-bar.pos-bottom-left  { left: 0 !important; right: auto !important; top: auto !important; }
+      .avocado-dl-bar.pos-bottom-left.size-small   { bottom: -26px !important; }
+      .avocado-dl-bar.pos-bottom-left.size-medium  { bottom: -32px !important; }
+      .avocado-dl-bar.pos-bottom-left.size-large   { bottom: -38px !important; }
+      .avocado-dl-bar.pos-bottom-left.mode-mini.size-small  { bottom: -28px !important; }
+      .avocado-dl-bar.pos-bottom-left.mode-mini.size-medium { bottom: -34px !important; }
+      .avocado-dl-bar.pos-bottom-left.mode-mini.size-large  { bottom: -44px !important; }
 
       .avocado-dl-bar { cursor: grab; }
       .avocado-dl-bar:active { cursor: grabbing; }
@@ -634,6 +675,14 @@
       }
       .avocado-dl-bar.attached.mode-mini {
         border-radius: 8px 8px 0 0 !important;
+      }
+      .avocado-dl-bar.attached.pos-bottom-right,
+      .avocado-dl-bar.attached.pos-bottom-left {
+        border-radius: 0 0 8px 8px !important;
+      }
+      .avocado-dl-bar.attached.mode-mini.pos-bottom-right,
+      .avocado-dl-bar.attached.mode-mini.pos-bottom-left {
+        border-radius: 0 0 8px 8px !important;
       }
 
       .avocado-dl-btn {
@@ -666,12 +715,12 @@
       }
       .avocado-dl-btn .btn-label { line-height: 1; }
 
-      .avocado-dl-bar.size-small .avocado-dl-btn  { padding: 7px 14px 7px 11px; font-size: 11.5px; gap: 7px; }
-      .avocado-dl-bar.size-small .avocado-dl-btn svg { width: 13px; height: 13px; }
-      .avocado-dl-bar.size-small .avocado-dl-close { width: 32px !important; }
-      .avocado-dl-bar.size-large  .avocado-dl-btn { padding: 13px 24px 13px 19px; font-size: 14px; gap: 12px; }
-      .avocado-dl-bar.size-large  .avocado-dl-close { width: 44px !important; }
-      .avocado-dl-bar.size-large  .avocado-dl-btn svg { width: 18px; height: 18px; }
+      .avocado-dl-bar.size-small  .avocado-dl-btn { padding: 5px 10px 5px 8px; font-size: 10px; gap: 5px; }
+      .avocado-dl-bar.size-small  .avocado-dl-btn svg { width: 11px; height: 11px; }
+      .avocado-dl-bar.size-small  .avocado-dl-close { width: 26px !important; }
+      .avocado-dl-bar.size-medium .avocado-dl-btn { padding: 7px 14px 7px 11px; font-size: 11.5px; gap: 7px; }
+      .avocado-dl-bar.size-medium .avocado-dl-btn svg { width: 13px; height: 13px; }
+      .avocado-dl-bar.size-medium .avocado-dl-close { width: 32px !important; }
 
       .avocado-dl-bar.mode-mini {
         border-radius: 50%;
@@ -695,10 +744,10 @@
       .avocado-dl-bar.mode-mini .avocado-dl-divider,
       .avocado-dl-bar.mode-mini .avocado-dl-close { display: none !important; }
       .avocado-dl-bar.mode-mini .avocado-dl-btn svg { width: 20px; height: 20px; }
-      .avocado-dl-bar.mode-mini.size-small .avocado-dl-btn { padding: 9px; }
-      .avocado-dl-bar.mode-mini.size-small .avocado-dl-btn svg { width: 16px; height: 16px; }
-      .avocado-dl-bar.mode-mini.size-large .avocado-dl-btn { padding: 15px; }
-      .avocado-dl-bar.mode-mini.size-large .avocado-dl-btn svg { width: 24px; height: 24px; }
+      .avocado-dl-bar.mode-mini.size-small  .avocado-dl-btn { padding: 7px; }
+      .avocado-dl-bar.mode-mini.size-small  .avocado-dl-btn svg { width: 13px; height: 13px; }
+      .avocado-dl-bar.mode-mini.size-medium .avocado-dl-btn { padding: 9px; }
+      .avocado-dl-bar.mode-mini.size-medium .avocado-dl-btn svg { width: 16px; height: 16px; }
 
       .avocado-dl-divider {
         width: 1px;
@@ -770,6 +819,8 @@
       if (currentHoveredVideo) {
         dismissedVideoElement = currentHoveredVideo;
       }
+      dismissedKeys.add(window.location.href);
+      saveDismissedKeys();
       hideOverlayButton();
       currentHoveredVideo = null;
     });
@@ -828,6 +879,7 @@
       document.removeEventListener('pointercancel', onPointerUp, true);
       armed = false;
       isDragArmed = false;
+      if (floatingBtn) floatingBtn.bar.classList.remove('idle');
 
       if (isDraggingButton) {
         isDraggingButton = false;
@@ -839,6 +891,8 @@
 
     function startPress(e) {
       if (e.button !== undefined && e.button !== 0) return;
+      if (mouseIdleTimer) { clearTimeout(mouseIdleTimer); mouseIdleTimer = null; }
+      if (floatingBtn) floatingBtn.bar.classList.remove('idle');
       armed = true;
       isDragArmed = true;
       startX = e.clientX;
@@ -861,6 +915,18 @@
   document.addEventListener('mousemove', (e) => {
     if (isDraggingButton || isDragArmed) return;
 
+    if (floatingBtn && floatingBtn.host.parentElement) {
+      floatingBtn.bar.classList.remove('idle');
+      if (mouseIdleTimer) clearTimeout(mouseIdleTimer);
+      if (buttonIdleEnabled) {
+        mouseIdleTimer = setTimeout(() => {
+          if (floatingBtn && floatingBtn.host.parentElement) {
+            floatingBtn.bar.classList.add('idle');
+          }
+        }, 4000);
+      }
+    }
+
     if (mouseMoveThrottle) return;
     mouseMoveThrottle = setTimeout(() => { mouseMoveThrottle = null; }, 66);
     
@@ -871,6 +937,7 @@
     
     for (const video of videos) {
       if (!isRealVideoPlayer(video)) continue;
+      if (minVideoDuration > 0 && video.duration > 0 && video.duration < minVideoDuration) continue;
       const rect = video.getBoundingClientRect();
       if (e.clientX >= rect.left && e.clientX <= rect.right &&
           e.clientY >= rect.top && e.clientY <= rect.bottom) {
@@ -890,7 +957,7 @@
     }
     
     if (foundVideo && foundVideo !== currentHoveredVideo) {
-      if (dismissedVideoElement === foundVideo) return;
+      if (dismissedKeys.has(window.location.href) || dismissedVideoElement === foundVideo) return;
 
       const downloadInfo = getDownloadUrl(foundVideo);
       if (downloadInfo && downloadInfo.url) {
@@ -985,7 +1052,8 @@
   }
   
   function hideOverlayButton() {
-    if (isDraggingButton) return; // don't yank the button out mid-drag
+    if (isDraggingButton) return;
+    if (mouseIdleTimer) { clearTimeout(mouseIdleTimer); mouseIdleTimer = null; }
     if (floatingBtn && floatingBtn.host.parentElement) {
       floatingBtn.host.remove();
     }

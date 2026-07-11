@@ -113,6 +113,44 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label for="button-idle">Auto-dim on idle</label>
+            <span class="setting-desc">Fade the download button to 25% opacity when you stop moving the mouse over a video</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="button-idle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label for="idle-opacity">Idle dim opacity</label>
+            <span class="setting-desc">How transparent the button becomes when idle (lower = more faded)</span>
+          </div>
+          <div class="setting-range-wrapper">
+            <input type="range" id="idle-opacity" min="0" max="100" value="25" class="setting-range">
+            <span class="range-value" id="idle-opacity-value">25%</span>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label for="min-video-duration">Minimum video length</label>
+            <span class="setting-desc">Only show the download button on videos longer than this</span>
+          </div>
+          <div class="setting-select-wrapper">
+            <select id="min-video-duration" class="setting-select">
+              <option value="0">Any length</option>
+              <option value="10">10 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="60">1 minute</option>
+              <option value="120">2 minutes</option>
+            </select>
+          </div>
+        </div>
       </section>
       
       <!-- Maintenance Section -->
@@ -157,7 +195,7 @@
         <div class="about-info">
           <div class="about-row">
             <span class="about-label">Version</span>
-            <span class="about-value">1.0.0</span>
+            <span class="about-value">1.1.0</span>
           </div>
           <div class="about-row">
             <span class="about-label">GitHub</span>

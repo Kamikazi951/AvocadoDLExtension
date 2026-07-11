@@ -292,3 +292,43 @@ html, body {
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* ─── Popup Range Slider ───────────────────────────────────────────────────── */
+
+.popup-range-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.popup-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 3px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.popup-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+  cursor: pointer;
+}
+
+.popup-range-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-light);
+  min-width: 30px;
+  text-align: right;
+}
