@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AvocadoDL — Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="settings-container">
+    <!-- Header -->
+    <header class="settings-header">
+      <div class="settings-logo">
+        <svg class="settings-logo-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="sg" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#8bc34a"/>
+              <stop offset="50%" style="stop-color:#7cb342"/>
+              <stop offset="100%" style="stop-color:#558b2f"/>
+            </linearGradient>
+          </defs>
+          <circle cx="16" cy="16" r="14" fill="url(#sg)" opacity="0.2"/>
+          <path d="M16 6C11 6 7 11 7 17c0 5 3 9 9 9s9-4 9-9c0-6-4-11-9-11zm0 14a4 4 0 1 1 0-8 4 4 0 0 1 0 8z" fill="url(#sg)"/>
+          <circle cx="16" cy="16" r="2.5" fill="#5D4037"/>
+        </svg>
+        <div>
+          <h1 class="settings-title">AvocadoDL Settings</h1>
+          <p class="settings-subtitle">Configure your video download helper</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Settings Sections -->
+    <div class="settings-body">
+      
+      <!-- UI Section -->
+      <section class="settings-section">
+        <h2 class="section-title">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          Interface
+        </h2>
+        
+        <div class="setting-row">
+          <div class="setting-info">
+            <label for="floating-button">Floating download button</label>
+            <span class="setting-desc">Show a download button when hovering over video players</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="floating-button" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>Button display mode</label>
+            <span class="setting-desc">Show the full download banner, or a compact circular icon you can expand</span>
+          </div>
+          <div class="mode-toggle" role="radiogroup" aria-label="Button display mode">
+            <label class="mode-option">
+              <input type="radio" name="floating-button-mode" value="full" checked>
+              <span class="mode-option-inner">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 6h16v4H4zm0 0" opacity="0"/><rect x="3" y="8" width="18" height="8" rx="4" fill="currentColor"/></svg>
+                Full
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="floating-button-mode" value="mini">
+              <span class="mode-option-inner">
+                <svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="7" fill="currentColor"/></svg>
+                Mini icon
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label for="floating-button-size">Floating button size</label>
+            <span class="setting-desc">Choose the scale of the hover button on video players</span>
+          </div>
+          <div class="setting-select-wrapper">
+            <select id="floating-button-size" class="setting-select">
+              <option value="small">Small (28px)</option>
+              <option value="medium" selected>Medium (36px)</option>
+              <option value="large">Large (44px)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label for="floating-button-position">Floating button position</label>
+            <span class="setting-desc">Choose which corner of the video player the button appears on</span>
+          </div>
+          <div class="setting-select-wrapper">
+            <select id="floating-button-position" class="setting-select">
+              <option value="top-left">Top-Left</option>
+              <option value="top-right" selected>Top-Right</option>
+              <option value="bottom-left">Bottom-Left</option>
+              <option value="bottom-right">Bottom-Right</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label for="clipboard-pill">Show copied link notification</label>
+            <span class="setting-desc">Show a floating notification at the bottom center when you copy a video link</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="clipboard-pill" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </section>
+      
+      <!-- Maintenance Section -->
+      <section class="settings-section">
+        <h2 class="section-title">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+          Maintenance
+        </h2>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>Reset button position</label>
+            <span class="setting-desc">Move the dragged download button back to its anchored corner</span>
+          </div>
+          <button id="btn-reset-position" class="btn-action">
+            Reset Position
+          </button>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>Reset settings</label>
+            <span class="setting-desc">Reset all extension preferences to their factory defaults</span>
+          </div>
+          <button id="btn-reset-settings" class="btn-action">
+            Reset Defaults
+          </button>
+        </div>
+      </section>
+
+      <!-- About Section -->
+      <section class="settings-section">
+        <h2 class="section-title">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          About
+        </h2>
+        
+        <p class="about-desc">
+          AvocadoDL is a lightweight download helper for Chrome. Hover over any video to reveal a one-click download button, or copy a social media post link and get an instant download prompt — all sent directly to Free Download Manager.
+        </p>
+
+        <div class="about-info">
+          <div class="about-row">
+            <span class="about-label">Version</span>
+            <span class="about-value">1.0.0</span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">GitHub</span>
+            <a class="about-link" href="https://github.com/Kamikazi951/AvocadoDLExtension" target="_blank">Kamikazi951/AvocadoDLExtension</a>
+          </div>
+        </div>
+      </section>
+      
+    </div>
+
+    <!-- Save Toast -->
+    <div class="toast" id="toast">Settings saved ✓</div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>
