@@ -7,6 +7,15 @@ A premium, smart video download helper for Google Chrome (Manifest V3). AvocadoD
 
 ---
 
+## ✨ What's New in v1.2
+
+*   **Fixed per-video dismissal** — Closing/dismissing a download button now isolates strictly to that specific video. Other videos in timelines, search results, and feeds remain active.
+*   **YouTube feed card support** — Hovering over thumbnails in YouTube home feeds, search results, and channel pages now immediately detects videos.
+*   **Expanded platform coverage** — Direct card detection added for Threads (`threads.net`), Bluesky (`bsky.app`), Pinterest (`pinterest.com`), and Twitch Clips.
+*   **Right-click context menu** — Right-click any video, audio, link, or page and choose *"Download with AvocadoDL (via FDM)"*.
+
+---
+
 ## ✨ What's New in v1.1
 
 *   **Redesigned download banner** — Glass-morphism design with #7cb342 gradient, 16px backdrop blur, and smooth animations.
