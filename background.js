@@ -47,7 +47,11 @@ function prepareDownloadUrl(url) {
                      hostname.includes('reddit.com') ||
                      hostname.includes('facebook.com') ||
                      hostname.includes('youtube.com') ||
-                     hostname.includes('youtu.be');
+                     hostname.includes('youtu.be') ||
+                     hostname.includes('threads.net') ||
+                     hostname.includes('bsky.app') ||
+                     hostname.includes('pinterest.com') ||
+                     hostname.includes('twitch.tv');
     
     if (isSocial) {
       // Append the FDM integration GUID to trigger FDM's native onBeforeRequest interceptor.
@@ -59,6 +63,26 @@ function prepareDownloadUrl(url) {
     // Fallback if URL is invalid
   }
   return url;
+}
+
+function triggerFdmDownload(url, tabId, frameId = 0) {
+  const finalUrl = prepareDownloadUrl(url);
+  if (finalUrl.includes('fdmguid=')) {
+    if (tabId !== undefined) {
+      chrome.tabs.sendMessage(tabId, { type: 'TRIGGER_FDM_FETCH', url: finalUrl }, { frameId }, () => {
+        if (chrome.runtime.lastError) {
+          fetch(finalUrl, { mode: 'no-cors' }).catch(() => {});
+        }
+      });
+    } else {
+      fetch(finalUrl, { mode: 'no-cors' }).catch(() => {});
+    }
+  } else {
+    chrome.downloads.download({
+      url: finalUrl,
+      saveAs: true
+    }, () => {});
+  }
 }
 
 // ─── Message Handler ─────────────────────────────────────────────────────────
@@ -140,6 +164,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// ─── Context Menu ────────────────────────────────────────────────────────────
+
+function setupContextMenu() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'avocadodl-download',
+      title: 'Download with AvocadoDL (via FDM)',
+      contexts: ['video', 'audio', 'link', 'page']
+    });
+  });
+}
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'avocadodl-download') {
+    const targetUrl = info.mediaType === 'video' || info.mediaType === 'audio' 
+      ? (info.srcUrl || info.linkUrl || info.pageUrl)
+      : (info.linkUrl || info.pageUrl);
+      
+    if (targetUrl && tab?.id) {
+      triggerFdmDownload(targetUrl, tab.id, info.frameId || 0);
+    }
+  }
+});
+
 // ─── Extension Install / Update ──────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -147,6 +195,11 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.storage.sync.set({ settings: DEFAULT_SETTINGS });
     console.log('AvocadoDL: Extension installed');
   }
+  setupContextMenu();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  setupContextMenu();
 });
 
 console.log('AvocadoDL: Service worker started');

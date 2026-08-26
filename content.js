@@ -32,7 +32,7 @@
   let isDraggingButton = false;
   let isDragArmed = false;
   let suppressButtonClick = false;
-  let dismissedVideoElement = null;
+  const dismissedVideoElements = new WeakSet();
   let buttonIdleEnabled = true;
   let mouseIdleTimer = null;
   let minVideoDuration = 0;
@@ -40,8 +40,80 @@
   let dismissedKeys = new Set();
 
   chrome.storage.session.get('dismissedKeys', (result) => {
-    if (result.dismissedKeys) dismissedKeys = new Set(result.dismissedKeys);
+    if (result.dismissedKeys && Array.isArray(result.dismissedKeys)) {
+      dismissedKeys = new Set(result.dismissedKeys);
+    }
   });
+
+  function isSpecificVideoUrl(url) {
+    if (!url) return false;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      const path = u.pathname;
+
+      // YouTube watch or shorts
+      if (host.includes('youtube.com') && (path.startsWith('/watch') || path.startsWith('/shorts/'))) return true;
+      if (host.includes('youtu.be') && path.length > 1) return true;
+
+      // Twitter / X status
+      if ((host.includes('twitter.com') || host.includes('x.com')) && /\/status\/\d+/i.test(path)) return true;
+
+      // TikTok video
+      if (host.includes('tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(path)) return true;
+
+      // Instagram post/reel
+      if (host.includes('instagram.com') && /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i.test(path)) return true;
+
+      // Reddit comments
+      if (host.includes('reddit.com') && /\/comments\/[a-zA-Z0-9]+/i.test(path)) return true;
+
+      // Facebook post / video / reel
+      if (host.includes('facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(path)) return true;
+
+      // Threads / Bluesky / Pinterest / Twitch
+      if (host.includes('threads.net') && /\/post\/[a-zA-Z0-9_-]+/i.test(path)) return true;
+      if (host.includes('bsky.app') && /\/post\/[a-zA-Z0-9_-]+/i.test(path)) return true;
+      if (host.includes('pinterest.com') && /\/pin\/\d+/i.test(path)) return true;
+      if (host.includes('twitch.tv') && (path.includes('/clip/') || path.includes('/videos/'))) return true;
+
+      // Direct media files
+      if (MEDIA_EXTENSIONS && (MEDIA_EXTENSIONS.test(path) || MEDIA_EXTENSIONS.test(url))) return true;
+
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isVideoDismissed(videoElement, videoUrl) {
+    if (!videoElement) return false;
+
+    const currentSrc = videoElement.currentSrc || videoElement.src || '';
+    const isDirectSrcValid = currentSrc && !currentSrc.startsWith('blob:') && !currentSrc.startsWith('data:');
+
+    // Check dataset key
+    if (videoElement.dataset && videoElement.dataset.avocadoDismissedKey) {
+      const key = videoElement.dataset.avocadoDismissedKey;
+      if (key === videoUrl || (isDirectSrcValid && key === currentSrc) || key === 'dismissed') {
+        return true;
+      }
+    }
+
+    // Check WeakSet (only if the video source hasn't changed to something else)
+    if (dismissedVideoElements.has(videoElement)) {
+      const initialSrc = videoElement.dataset?.avocadoInitialSrc;
+      if (!initialSrc || initialSrc === currentSrc) {
+        return true;
+      }
+    }
+
+    // Check specific URLs in session storage
+    if (videoUrl && dismissedKeys.has(videoUrl)) return true;
+    if (isDirectSrcValid && dismissedKeys.has(currentSrc)) return true;
+
+    return false;
+  }
 
   function updateAttachedState() {
     if (!floatingBtn) return;
@@ -68,7 +140,9 @@
   }
 
   function saveDismissedKeys() {
-    chrome.storage.session.set({ dismissedKeys: [...dismissedKeys] });
+    try {
+      chrome.storage.session.set({ dismissedKeys: [...dismissedKeys] });
+    } catch (e) {}
   }
 
   function applyDragOffset() {
@@ -417,6 +491,20 @@
         return href;
       }
 
+      // YouTube card & feed items
+      if (hostname.includes('youtube.com')) {
+        if (href.includes('/watch') || href.includes('/shorts/')) {
+          return href;
+        }
+        const card = videoElement.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-reel-item-renderer, ytd-compact-video-renderer, ytd-shorts, ytd-notification-renderer');
+        if (card) {
+          const link = card.querySelector('a#thumbnail, a[href*="/watch?v="], a[href*="/shorts/"]');
+          if (link && link.href) {
+            return link.href;
+          }
+        }
+      }
+
       // 2. Identify the site-specific card container and link patterns
       let cardSelector = null;
       let pattern = null;
@@ -436,6 +524,15 @@
       } else if (hostname.includes('reddit.com')) {
         cardSelector = 'shreddit-post, [data-testid="post-container"], div.Post, [role="article"]';
         pattern = /\/comments\/[a-zA-Z0-9]+/i;
+      } else if (hostname.includes('threads.net')) {
+        cardSelector = 'div[data-pressable-container="true"], article, div[role="article"]';
+        pattern = /\/post\/[a-zA-Z0-9_-]+/i;
+      } else if (hostname.includes('bsky.app')) {
+        cardSelector = 'div[data-testid*="post-"], div[data-testid="feedItem"]';
+        pattern = /\/profile\/[^/]+\/post\/[a-zA-Z0-9]+/i;
+      } else if (hostname.includes('pinterest.com')) {
+        cardSelector = 'div[data-test-id="pin"], div[data-test-id="pinWrapper"]';
+        pattern = /\/pin\/\d+/i;
       }
 
       if (!pattern) return null;
@@ -517,7 +614,10 @@
         hostname.includes('x.com') || 
         hostname.includes('tiktok.com') || 
         hostname.includes('reddit.com') || 
-        hostname.includes('facebook.com')) {
+        hostname.includes('facebook.com') ||
+        hostname.includes('threads.net') ||
+        hostname.includes('bsky.app') ||
+        hostname.includes('pinterest.com')) {
       const postUrl = findSocialPostUrl(videoElement);
       if (postUrl) {
         return { url: postUrl, isDirect: false };
@@ -528,7 +628,10 @@
                          ((hostname.includes('twitter.com') || hostname.includes('x.com')) && /\/status\/\d+/i.test(href)) ||
                          (hostname.includes('tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(href)) ||
                          (hostname.includes('reddit.com') && /\/comments\//i.test(href)) ||
-                         (hostname.includes('facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(href));
+                         (hostname.includes('facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(href)) ||
+                         (hostname.includes('threads.net') && /\/post\/[a-zA-Z0-9_-]+/i.test(href)) ||
+                         (hostname.includes('bsky.app') && /\/profile\/[^/]+\/post\/[a-zA-Z0-9]+/i.test(href)) ||
+                         (hostname.includes('pinterest.com') && /\/pin\/\d+/i.test(href));
                          
       if (isPostPage) {
         return { url: href, isDirect: false };
@@ -536,6 +639,12 @@
       
       // Do NOT fall back to feed homepage URLs (e.g. tiktok.com/ or x.com/home)
       return null;
+    }
+
+    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+      const ytUrl = findSocialPostUrl(videoElement);
+      if (ytUrl) return { url: ytUrl, isDirect: false };
+      if (href.includes('/watch') || href.includes('/shorts/')) return { url: href, isDirect: false };
     }
 
     const directSrc = extractMediaSrc(videoElement);
@@ -560,7 +669,6 @@
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       currentHoveredVideo = null;
-      dismissedVideoElement = null;
       floatingButtonOffset = { x: 0, y: 0 };
       hideOverlayButton();
     }
@@ -816,11 +924,29 @@
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
+
       if (currentHoveredVideo) {
-        dismissedVideoElement = currentHoveredVideo;
+        dismissedVideoElements.add(currentHoveredVideo);
+        try {
+          const key = (currentVideoTarget && currentVideoTarget.url) || currentHoveredVideo.currentSrc || currentHoveredVideo.src || 'dismissed';
+          currentHoveredVideo.dataset.avocadoDismissedKey = key;
+          currentHoveredVideo.dataset.avocadoInitialSrc = currentHoveredVideo.currentSrc || currentHoveredVideo.src || '';
+        } catch (err) {}
       }
-      dismissedKeys.add(window.location.href);
-      saveDismissedKeys();
+
+      if (currentVideoTarget && currentVideoTarget.url) {
+        if (isSpecificVideoUrl(currentVideoTarget.url)) {
+          dismissedKeys.add(currentVideoTarget.url);
+          saveDismissedKeys();
+        }
+      }
+
+      const directSrc = currentHoveredVideo ? (currentHoveredVideo.currentSrc || currentHoveredVideo.src) : null;
+      if (directSrc && !directSrc.startsWith('blob:') && !directSrc.startsWith('data:')) {
+        dismissedKeys.add(directSrc);
+        saveDismissedKeys();
+      }
+
       hideOverlayButton();
       currentHoveredVideo = null;
     });
@@ -957,20 +1083,23 @@
     }
     
     if (foundVideo && foundVideo !== currentHoveredVideo) {
-      if (dismissedKeys.has(window.location.href) || dismissedVideoElement === foundVideo) return;
-
       const downloadInfo = getDownloadUrl(foundVideo);
-      if (downloadInfo && downloadInfo.url) {
-        currentHoveredVideo = foundVideo;
-        currentVideoTarget = { element: foundVideo, url: downloadInfo.url, isDirect: downloadInfo.isDirect };
-        if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
-        showOverlayButton(foundVideo);
-      } else {
+      if (!downloadInfo || !downloadInfo.url) {
         currentHoveredVideo = null;
         currentVideoTarget = null;
         if (hideTimeout) clearTimeout(hideTimeout);
         hideTimeout = setTimeout(() => hideOverlayButton(), 400);
+        return;
       }
+
+      if (isVideoDismissed(foundVideo, downloadInfo.url)) {
+        return;
+      }
+
+      currentHoveredVideo = foundVideo;
+      currentVideoTarget = { element: foundVideo, url: downloadInfo.url, isDirect: downloadInfo.isDirect };
+      if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
+      showOverlayButton(foundVideo);
     } else if (!foundVideo && currentHoveredVideo) {
       currentHoveredVideo = null;
       if (hideTimeout) clearTimeout(hideTimeout);
