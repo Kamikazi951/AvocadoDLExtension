@@ -15,6 +15,32 @@
   if (window.__avocadoDLContentScriptLoaded) return;
   window.__avocadoDLContentScriptLoaded = true;
   
+  // Safe helper to check if extension context is alive (prevents "Extension context invalidated" errors)
+  function isExtensionContextValid() {
+    return typeof chrome !== 'undefined' && !!chrome?.runtime?.id && typeof chrome?.runtime?.sendMessage === 'function';
+  }
+
+  function safeSendMessage(message, callback) {
+    if (!isExtensionContextValid()) {
+      return;
+    }
+    try {
+      const p = chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime?.lastError) {
+          // Suppress to avoid uncaught runtime.lastError
+        }
+        if (typeof callback === 'function') {
+          callback(response);
+        }
+      });
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => {});
+      }
+    } catch (e) {
+      // Ignore context invalidation when extension is reloaded
+    }
+  }
+  
   // ─── State ──────────────────────────────────────────────────────────────────
   
   const detectedUrls = new Set();
@@ -39,11 +65,15 @@
   let idleOpacity = 0.25;
   let dismissedKeys = new Set();
 
-  chrome.storage.session.get('dismissedKeys', (result) => {
-    if (result.dismissedKeys && Array.isArray(result.dismissedKeys)) {
-      dismissedKeys = new Set(result.dismissedKeys);
+  try {
+    if (typeof chrome !== 'undefined' && chrome?.storage?.session) {
+      chrome.storage.session.get('dismissedKeys', (result) => {
+        if (result?.dismissedKeys && Array.isArray(result.dismissedKeys)) {
+          dismissedKeys = new Set(result.dismissedKeys);
+        }
+      });
     }
-  });
+  } catch (e) {}
 
   function isSpecificVideoUrl(url) {
     if (!url) return false;
@@ -383,7 +413,7 @@
     const pageTitle = document.title || '';
     const thumbnail = getPageThumbnail();
     
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'MEDIA_FOUND',
       url: url,
       mediaType: mediaType || '',
@@ -391,7 +421,7 @@
       size: -1,
       pageTitle: pageTitle,
       thumbnail: thumbnail
-    }).catch(() => {});
+    });
   }
   
   /**
@@ -1151,7 +1181,19 @@
       if (btn.classList.contains('sent')) return;
       
       if (currentVideoTarget) {
-        chrome.runtime.sendMessage({
+        if (!isExtensionContextValid()) {
+          if (labelEl) labelEl.textContent = 'Please refresh page';
+          setTimeout(() => {
+            if (labelEl) {
+              labelEl.textContent = currentVideoTarget && !currentVideoTarget.isDirect
+                ? 'Download video (via FDM)'
+                : 'Download video';
+            }
+          }, 2500);
+          return;
+        }
+
+        safeSendMessage({
           type: 'MEDIA_FOUND',
           url: currentVideoTarget.url,
           mediaType: 'video/mp4',
@@ -1160,7 +1202,7 @@
           thumbnail: getPageThumbnail()
         });
         
-        chrome.runtime.sendMessage({
+        safeSendMessage({
           type: 'DOWNLOAD_AS',
           url: currentVideoTarget.url
         });
@@ -1208,22 +1250,24 @@
   
   // ─── Listen for settings changes ────────────────────────────────────────────
   
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.settings) {
-      const newSettings = changes.settings.newValue;
-      applyLoadedSettings(newSettings);
-      if (newSettings && newSettings.floatingButtonOffset &&
-          newSettings.floatingButtonOffset.x === 0 &&
-          newSettings.floatingButtonOffset.y === 0 &&
-          (floatingButtonOffset.x !== 0 || floatingButtonOffset.y !== 0)) {
-        floatingButtonOffset = { x: 0, y: 0 };
-        updateFloatingButtonStyles();
+  if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes.settings) {
+        const newSettings = changes.settings.newValue;
+        applyLoadedSettings(newSettings);
+        if (newSettings && newSettings.floatingButtonOffset &&
+            newSettings.floatingButtonOffset.x === 0 &&
+            newSettings.floatingButtonOffset.y === 0 &&
+            (floatingButtonOffset.x !== 0 || floatingButtonOffset.y !== 0)) {
+          floatingButtonOffset = { x: 0, y: 0 };
+          updateFloatingButtonStyles();
+        }
+        if (!showFloatingButton) {
+          hideOverlayButton();
+        }
       }
-      if (!showFloatingButton) {
-        hideOverlayButton();
-      }
-    }
-  });
+    });
+  }
 
   // ─── Active Video Detector for Popup ────────────────────────────────────────
 
@@ -1297,16 +1341,18 @@
   }
 
   // Listen for messages from the popup panel
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'GET_ACTIVE_VIDEO') {
-      const activeVideo = getActiveVideo();
-      sendResponse({ activeVideo });
-    }
-    if (message.type === 'TRIGGER_FDM_FETCH') {
-      fetch(message.url, { mode: 'no-cors' }).catch(() => {});
-      sendResponse({ ok: true });
-    }
-    return true;
-  });
+  if (typeof chrome !== 'undefined' && chrome?.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === 'GET_ACTIVE_VIDEO') {
+        const activeVideo = getActiveVideo();
+        sendResponse({ activeVideo });
+      }
+      if (message.type === 'TRIGGER_FDM_FETCH') {
+        fetch(message.url, { mode: 'no-cors' }).catch(() => {});
+        sendResponse({ ok: true });
+      }
+      return true;
+    });
+  }
   
 })();
