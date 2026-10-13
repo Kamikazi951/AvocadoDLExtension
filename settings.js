@@ -48,7 +48,7 @@
       floatingButtonEl.checked = settings.showFloatingButton;
       clipboardPillEl.checked = settings.showClipboardPill !== false;
       buttonIdleEl.checked = settings.buttonIdle !== false;
-      idleOpacityEl.value = Math.round((settings.idleOpacity || 0.25) * 100);
+      idleOpacityEl.value = Math.round((settings.idleOpacity ?? 0.25) * 100);
       idleOpacityValueEl.textContent = idleOpacityEl.value + '%';
       minVideoDurationEl.value = settings.minVideoDuration || 0;
       floatingButtonSizeEl.value = settings.floatingButtonSize || 'medium';

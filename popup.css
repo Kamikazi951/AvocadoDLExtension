@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 * {
   margin: 0;
@@ -29,7 +28,9 @@ html, body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 600px;
   display: flex;
   flex-direction: column;
   -webkit-font-smoothing: antialiased;
@@ -332,3 +333,14 @@ html, body {
   min-width: 30px;
   text-align: right;
 }
+/* Detected URLs are private to this browser session and cleared on navigation. */
+.download-panel { padding: 12px 18px; border-top: 1px solid #ffffff18; }
+.download-panel, .header, .popup-body, .popup-footer { flex-shrink: 0; }
+#download-page { width: 100%; padding: 10px; color: #e4f6d5; border-color: #7cb34277; }
+.download-panel p { color: #b7bdc8; font-size: 12px; line-height: 1.5; margin: 10px 0; }
+#media-list { max-height: 160px; overflow-y: auto; }
+#media-list button { display: block; width: 100%; margin: 5px 0; padding: 8px;
+  text-align: left; color: #dce9cc; background: #7cb34218; border: 1px solid #7cb34244;
+  border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#media-list button:focus-visible { outline: 2px solid #aed581; }
+#media-list button.chrome-fallback { color: #b7bdc8; background: transparent; border-color: transparent; font-size: 11px; margin-top: -4px; padding-top: 2px; }
