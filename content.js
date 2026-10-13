@@ -1,8 +1,8 @@
 /**
  * AvocadoDL — Content Script
- * 
+ *
  * Runs on every page. Responsibilities:
- * 1. Injects the page-context interceptor (injected.js)
+ * 1. Receives observations from the declarative page-context interceptor
  * 2. DOM Scanner — MutationObserver for <video>, <audio>, <source> elements
  * 3. Floating download button — document-level mouse tracking (works on social media)
  * 4. Message bridge — relays from injected.js → background service worker
@@ -11,10 +11,10 @@
 
 (function() {
   'use strict';
-  
+
   if (window.__avocadoDLContentScriptLoaded) return;
   window.__avocadoDLContentScriptLoaded = true;
-  
+
   // Safe helper to check if extension context is alive (prevents "Extension context invalidated" errors)
   function isExtensionContextValid() {
     return typeof chrome !== 'undefined' && !!chrome?.runtime?.id && typeof chrome?.runtime?.sendMessage === 'function';
@@ -22,12 +22,13 @@
 
   function safeSendMessage(message, callback) {
     if (!isExtensionContextValid()) {
+      callback?.({ error: 'Extension updated. Refresh this page and try again.' });
       return;
     }
     try {
       const p = chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime?.lastError) {
-          // Suppress to avoid uncaught runtime.lastError
+          response = { error: chrome.runtime.lastError.message };
         }
         if (typeof callback === 'function') {
           callback(response);
@@ -37,13 +38,14 @@
         p.catch(() => {});
       }
     } catch (e) {
-      // Ignore context invalidation when extension is reloaded
+      callback?.({ error: 'Extension updated. Refresh this page and try again.' });
     }
   }
-  
+
   // ─── State ──────────────────────────────────────────────────────────────────
-  
+
   const detectedUrls = new Set();
+  const twitterMedia = new Map();
   let floatingBtn = null;
   let currentVideoTarget = null;
   let currentHoveredVideo = null;
@@ -58,22 +60,14 @@
   let isDraggingButton = false;
   let isDragArmed = false;
   let suppressButtonClick = false;
-  const dismissedVideoElements = new WeakSet();
+  let dismissedVideoElements = new WeakMap();
   let buttonIdleEnabled = true;
   let mouseIdleTimer = null;
   let minVideoDuration = 0;
   let idleOpacity = 0.25;
   let dismissedKeys = new Set();
 
-  try {
-    if (typeof chrome !== 'undefined' && chrome?.storage?.session) {
-      chrome.storage.session.get('dismissedKeys', (result) => {
-        if (result?.dismissedKeys && Array.isArray(result.dismissedKeys)) {
-          dismissedKeys = new Set(result.dismissedKeys);
-        }
-      });
-    }
-  } catch (e) {}
+
 
   function isSpecificVideoUrl(url) {
     if (!url) return false;
@@ -83,29 +77,29 @@
       const path = u.pathname;
 
       // YouTube watch or shorts
-      if (host.includes('youtube.com') && (path.startsWith('/watch') || path.startsWith('/shorts/'))) return true;
-      if (host.includes('youtu.be') && path.length > 1) return true;
+      if (AvocadoUrls.hostMatches(host, 'youtube.com') && (path.startsWith('/watch') || path.startsWith('/shorts/'))) return true;
+      if (AvocadoUrls.hostMatches(host, 'youtu.be') && path.length > 1) return true;
 
       // Twitter / X status
-      if ((host.includes('twitter.com') || host.includes('x.com')) && /\/status\/\d+/i.test(path)) return true;
+      if ((AvocadoUrls.hostMatches(host, 'twitter.com') || AvocadoUrls.hostMatches(host, 'x.com')) && /\/status\/\d+/i.test(path)) return true;
 
       // TikTok video
-      if (host.includes('tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(path)) return true;
+      if (AvocadoUrls.hostMatches(host, 'tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(path)) return true;
 
       // Instagram post/reel
-      if (host.includes('instagram.com') && /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i.test(path)) return true;
+      if (AvocadoUrls.hostMatches(host, 'instagram.com') && /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i.test(path)) return true;
 
       // Reddit comments
-      if (host.includes('reddit.com') && /\/comments\/[a-zA-Z0-9]+/i.test(path)) return true;
+      if (AvocadoUrls.hostMatches(host, 'reddit.com') && /\/comments\/[a-zA-Z0-9]+/i.test(path)) return true;
 
       // Facebook post / video / reel
-      if (host.includes('facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(path)) return true;
+      if (AvocadoUrls.hostMatches(host, 'facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(path)) return true;
 
       // Threads / Bluesky / Pinterest / Twitch
-      if (host.includes('threads.net') && /\/post\/[a-zA-Z0-9_-]+/i.test(path)) return true;
-      if (host.includes('bsky.app') && /\/post\/[a-zA-Z0-9_-]+/i.test(path)) return true;
-      if (host.includes('pinterest.com') && /\/pin\/\d+/i.test(path)) return true;
-      if (host.includes('twitch.tv') && (path.includes('/clip/') || path.includes('/videos/'))) return true;
+      if ((AvocadoUrls.hostMatches(host, 'threads.net') || AvocadoUrls.hostMatches(host, 'threads.com')) && /\/post\/[a-zA-Z0-9_-]+/i.test(path)) return true;
+      if (AvocadoUrls.hostMatches(host, 'bsky.app') && /\/post\/[a-zA-Z0-9_-]+/i.test(path)) return true;
+      if (AvocadoUrls.hostMatches(host, 'pinterest.com') && /\/pin\/\d+/i.test(path)) return true;
+      if (AvocadoUrls.hostMatches(host, 'twitch.tv') && (path.includes('/clip/') || path.includes('/videos/'))) return true;
 
       // Direct media files
       if (MEDIA_EXTENSIONS && (MEDIA_EXTENSIONS.test(path) || MEDIA_EXTENSIONS.test(url))) return true;
@@ -117,32 +111,7 @@
   }
 
   function isVideoDismissed(videoElement, videoUrl) {
-    if (!videoElement) return false;
-
-    const currentSrc = videoElement.currentSrc || videoElement.src || '';
-    const isDirectSrcValid = currentSrc && !currentSrc.startsWith('blob:') && !currentSrc.startsWith('data:');
-
-    // Check dataset key
-    if (videoElement.dataset && videoElement.dataset.avocadoDismissedKey) {
-      const key = videoElement.dataset.avocadoDismissedKey;
-      if (key === videoUrl || (isDirectSrcValid && key === currentSrc) || key === 'dismissed') {
-        return true;
-      }
-    }
-
-    // Check WeakSet (only if the video source hasn't changed to something else)
-    if (dismissedVideoElements.has(videoElement)) {
-      const initialSrc = videoElement.dataset?.avocadoInitialSrc;
-      if (!initialSrc || initialSrc === currentSrc) {
-        return true;
-      }
-    }
-
-    // Check specific URLs in session storage
-    if (videoUrl && dismissedKeys.has(videoUrl)) return true;
-    if (isDirectSrcValid && dismissedKeys.has(currentSrc)) return true;
-
-    return false;
+    return dismissedVideoElements.get(videoElement) === videoUrl || dismissedKeys.has(videoUrl);
   }
 
   function updateAttachedState() {
@@ -169,17 +138,17 @@
     applyDragOffset();
   }
 
-  function saveDismissedKeys() {
-    try {
-      chrome.storage.session.set({ dismissedKeys: [...dismissedKeys] });
-    } catch (e) {}
-  }
-
   function applyDragOffset() {
     if (!floatingBtn) return;
     const bar = floatingBtn.bar;
     if (!bar) return;
     bar.style.transform = `translate(${floatingButtonOffset.x}px, ${floatingButtonOffset.y}px)`;
+    if (floatingBtn.host.isConnected) {
+      const rect = bar.getBoundingClientRect();
+      const dx = rect.left < 4 ? 4 - rect.left : Math.min(0, innerWidth - rect.right - 4);
+      const dy = rect.top < 4 ? 4 - rect.top : Math.min(0, innerHeight - rect.bottom - 4);
+      bar.style.transform = `translate(${floatingButtonOffset.x + dx}px, ${floatingButtonOffset.y + dy}px)`;
+    }
     updateAttachedState();
   }
 
@@ -203,22 +172,7 @@
   chrome.storage.sync.get('settings', (result) => {
     applyLoadedSettings(result.settings);
   });
-  
-  // ─── 1. Inject Page-Context Script ──────────────────────────────────────────
-  
-  function injectPageScript() {
-    try {
-      const script = document.createElement('script');
-      script.src = chrome.runtime.getURL('injected.js');
-      script.onload = function() { this.remove(); };
-      (document.head || document.documentElement).appendChild(script);
-    } catch (e) {
-      console.log('AvocadoDL: Could not inject page script:', e);
-    }
-  }
-  
-  injectPageScript();
-  
+
   // ─── 2. Clipboard Interception Download Pill UI ──────────────────────────────
   const style = document.createElement('style');
   style.textContent = `
@@ -305,7 +259,7 @@
 
     const pill = document.createElement('div');
     pill.className = 'avocado-clipboard-pill';
-    
+
     let platform = 'video';
     if (url.includes('instagram.com')) platform = 'Instagram';
     else if (url.includes('twitter.com') || url.includes('x.com')) platform = 'Twitter';
@@ -335,17 +289,14 @@
     }, 50);
 
     pill.querySelector('.download').addEventListener('click', () => {
-      const separator = url.includes('?') ? '&' : '?';
-      const fdmUrl = url + separator + 'fdmguid=6d36f5b5519148d69647a983ebd677fc';
-      fetch(fdmUrl, { mode: 'no-cors' }).catch(() => {});
-      
-      const downloadBtn = pill.querySelector('.download');
-      downloadBtn.textContent = '✓ Sent!';
-      downloadBtn.style.background = 'linear-gradient(135deg, #2196F3, #64B5F6)';
-      
-      setTimeout(() => {
-        dismissPill();
-      }, 1000);
+      const button = pill.querySelector('.download');
+      button.disabled = true;
+      button.textContent = 'Requesting…';
+      safeSendMessage({ type: 'DOWNLOAD_AS', url, isDirect: false, pageUrl: location.href }, response => {
+        button.disabled = false;
+        button.textContent = response?.error ? 'Try again' : 'Check FDM';
+        pill.querySelector('.avocado-clipboard-text').textContent = response?.error || response?.message || 'No response. Please refresh this page.';
+      });
     });
 
     pill.querySelector('.dismiss').addEventListener('click', dismissPill);
@@ -371,27 +322,38 @@
 
   function checkAndTriggerClipboardPill(text) {
     if (!showClipboardPillSetting) return;
-    if (!text) return;
+    if (typeof text !== 'string' || text.length > 16384) return;
     const cleanText = text.trim();
-    const isSocialLink = /https?:\/\/(www\.)?(instagram\.com\/(p|reel|reels)\/|twitter\.com\/.+\/status\/|x\.com\/.+\/status\/|tiktok\.com\/(.+\/video\/\d+|t\/[a-zA-Z0-9_-]+)|reddit\.com\/r\/.+\/comments\/|facebook\.com\/.+\/(videos|watch|reel|posts)|youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts\/)/i.test(cleanText);
-    if (isSocialLink) {
-      displayClipboardPill(cleanText);
-    }
+    const parsed = AvocadoUrls.httpUrl(cleanText);
+    if (parsed && AvocadoUrls.isSocial(parsed.href)) displayClipboardPill(parsed.href);
   }
 
   // ─── 3. Message Bridge (injected.js → background & clipboard catch) ──────────
-  
+
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     if (!event.data || !event.data.__avocadoDL) return;
-    
+
     if (event.data.type === 'MEDIA_INTERCEPTED') {
       reportToBackground(event.data.url, event.data.mediaType, 'intercept');
     }
     if (event.data.type === 'CLIPBOARD_COPIED') {
       checkAndTriggerClipboardPill(event.data.text);
     }
+    if (event.data.type === 'TWITTER_MEDIA' && Array.isArray(event.data.items) &&
+        (AvocadoUrls.hostMatches(location.hostname, 'x.com') || AvocadoUrls.hostMatches(location.hostname, 'twitter.com'))) {
+      for (const item of event.data.items.slice(0, 200)) {
+        const key = AvocadoTwitter.posterKey(item?.poster);
+        const variant = AvocadoTwitter.bestVariant([item]);
+        if (!key || !variant) continue;
+        twitterMedia.delete(key);
+        twitterMedia.set(key, { ...variant, timestamp: Date.now() });
+        if (twitterMedia.size > 200) twitterMedia.delete(twitterMedia.keys().next().value);
+      }
+    }
   });
+  // Replay API data captured before this document_end content script loaded.
+  window.postMessage({ __avocadoDL: true, type: 'TWITTER_MEDIA_REQUEST' }, '*');
 
   // Also catch manual browser copies (e.g. highlighting text and copying)
   document.addEventListener('copy', () => {
@@ -402,28 +364,31 @@
       }
     }, 100);
   });
-  
+
   function reportToBackground(url, mediaType, source) {
-    if (!url || detectedUrls.has(url)) return;
+    if (!AvocadoUrls.httpUrl(url) || detectedUrls.has(url)) return;
+    if (AvocadoUrls.httpUrl(url).searchParams.has('fdmguid')) return;
     if (url.startsWith('blob:') || url.startsWith('data:')) return;
-    
+
+    if (detectedUrls.size >= 100) detectedUrls.delete(detectedUrls.values().next().value);
     detectedUrls.add(url);
-    
+
     // Extract thumbnail and title info for the popup
     const pageTitle = document.title || '';
     const thumbnail = getPageThumbnail();
-    
+
     safeSendMessage({
       type: 'MEDIA_FOUND',
       url: url,
       mediaType: mediaType || '',
       source: source || 'dom',
+      isDirect: true,
       size: -1,
       pageTitle: pageTitle,
       thumbnail: thumbnail
     });
   }
-  
+
   /**
    * Tries to extract a thumbnail URL from the page.
    * Checks: og:image meta, twitter:image meta, video poster, first large image near video.
@@ -432,51 +397,88 @@
     // Try og:image (works on YouTube, Twitter, Facebook, etc.)
     const ogImage = document.querySelector('meta[property="og:image"]');
     if (ogImage?.content) return ogImage.content;
-    
+
     // Try twitter:image
     const twitterImage = document.querySelector('meta[name="twitter:image"]');
     if (twitterImage?.content) return twitterImage.content;
-    
+
     // Try video poster attribute
     const video = document.querySelector('video[poster]');
     if (video?.poster) return video.poster;
-    
+
     // Try link[rel="image_src"]
     const imageSrc = document.querySelector('link[rel="image_src"]');
     if (imageSrc?.href) return imageSrc.href;
-    
+
     return '';
   }
-  
+
   // ─── 3. DOM Scanner ─────────────────────────────────────────────────────────
-  
+
   const MEDIA_EXTENSIONS = /\.(mp4|webm|mkv|avi|mov|flv|wmv|m4v|3gp|ogv|mp3|m4a|aac|ogg|opus|flac|wav|wma|m3u8|mpd)(\?|#|$)/i;
-  
+
   function extractMediaSrc(element) {
-    const src = element.src || element.currentSrc || element.getAttribute('src');
-    if (!src) return null;
-    if (src.startsWith('blob:') || src.startsWith('data:')) return null;
-    return src;
+    const selected = element.currentSrc || element.getAttribute('src');
+    // An active blob overrides child sources; those can be stale fallbacks.
+    if (selected) return AvocadoUrls.httpUrl(selected, document.baseURI)?.href || null;
+    const candidates = Array.from(element.querySelectorAll('source[src]'), source => source.src);
+    for (const src of candidates) {
+      const parsed = src && AvocadoUrls.httpUrl(src, document.baseURI);
+      if (parsed) return parsed.href;
+    }
+    return null;
   }
-  
+
+  // Cache players, including open shadow roots, instead of querying the entire
+  // document on every pointer move. New roots are also discovered on hover.
+  const mediaElements = new Set();
+  const watchedRoots = new WeakSet();
+  function scanMedia(root) {
+    if (root.nodeType === 1 && root.matches('video,audio')) mediaElements.add(root);
+    if (root.nodeType === 1 && root.shadowRoot) watchRoot(root.shadowRoot);
+    for (const node of root.querySelectorAll?.('*') || []) {
+      if (node.matches('video,audio')) mediaElements.add(node);
+      if (node.shadowRoot) watchRoot(node.shadowRoot);
+    }
+    for (const media of mediaElements) {
+      if (!media.isConnected) { mediaElements.delete(media); continue; }
+      const src = extractMediaSrc(media);
+      if (src) reportToBackground(src, media.tagName.toLowerCase(), 'dom');
+    }
+  }
+  function watchRoot(root) {
+    if (watchedRoots.has(root)) return;
+    watchedRoots.add(root);
+    scanMedia(root);
+    new MutationObserver(records => {
+      for (const record of records) {
+        if (record.type === 'attributes') {
+          const media = record.target.closest('video,audio');
+          const src = media && extractMediaSrc(media);
+          if (src) reportToBackground(src, media.tagName.toLowerCase(), 'dom');
+        } else {
+          for (const node of record.addedNodes) if (node.nodeType === 1) scanMedia(node);
+        }
+      }
+      for (const media of mediaElements) if (!media.isConnected) mediaElements.delete(media);
+    }).observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+  }
+  function getMediaElements() { return [...mediaElements].filter(media => media.isConnected); }
+  watchRoot(document);
+  for (const entry of performance.getEntriesByType('resource')) {
+    if (AvocadoUrls.isMedia(entry.name)) reportToBackground(entry.name, '', 'network');
+  }
+  document.addEventListener('loadedmetadata', event => {
+    if (event.target.matches?.('video,audio')) scanMedia(event.target);
+  }, true);
+
   function findSocialPostUrl(videoElement) {
     const hostname = window.location.hostname;
     const href = window.location.href;
 
     try {
-      // 1. Check if we're already on a direct post page
-      if (hostname.includes('instagram.com') && /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i.test(href)) {
-        return href;
-      }
-      if ((hostname.includes('twitter.com') || hostname.includes('x.com')) && /\/status\/\d+/i.test(href)) {
-        return href;
-      }
-      if (hostname.includes('tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(href)) {
-        return href;
-      }
-
       // TikTok feeds display videos inside containers with IDs like "xgwrapper-0-VIDEOID"
-      if (hostname.includes('tiktok.com')) {
+      if (AvocadoUrls.hostMatches(hostname, 'tiktok.com')) {
         const wrapper = videoElement.closest('[id*="xgwrapper-"]');
         let videoId = null;
         if (wrapper) {
@@ -501,7 +503,7 @@
         if (videoId) {
           let author = 'video';
           const card = videoElement.closest('[data-e2e="recommend-list-item"], [data-e2e="user-post-item-list"], div[class*="ItemContainer"], div[class*="RecommendItem"], div[class*="DivItemContainer"]');
-          const authLink = (card ? card.querySelector('a[href*="/@"]') : null) || 
+          const authLink = (card ? card.querySelector('a[href*="/@"]') : null) ||
                            document.querySelector('[data-e2e="video-author-uniqueid"]')?.closest('a') ||
                            document.querySelector('a[data-e2e="video-author-avatar"]') ||
                            document.querySelector('[class*="CreatorInfo"] a[href*="/@"]');
@@ -514,18 +516,9 @@
           return postUrl;
         }
       }
-      if (hostname.includes('facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(href)) {
-        return href;
-      }
-      if (hostname.includes('reddit.com') && /\/comments\//i.test(href)) {
-        return href;
-      }
 
       // YouTube card & feed items
-      if (hostname.includes('youtube.com')) {
-        if (href.includes('/watch') || href.includes('/shorts/')) {
-          return href;
-        }
+      if (AvocadoUrls.hostMatches(hostname, 'youtube.com')) {
         const card = videoElement.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-reel-item-renderer, ytd-compact-video-renderer, ytd-shorts, ytd-notification-renderer');
         if (card) {
           const link = card.querySelector('a#thumbnail, a[href*="/watch?v="], a[href*="/shorts/"]');
@@ -539,28 +532,28 @@
       let cardSelector = null;
       let pattern = null;
 
-      if (hostname.includes('instagram.com')) {
+      if (AvocadoUrls.hostMatches(hostname, 'instagram.com')) {
         cardSelector = 'article';
         pattern = /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i;
-      } else if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
+      } else if (AvocadoUrls.hostMatches(hostname, 'twitter.com') || AvocadoUrls.hostMatches(hostname, 'x.com')) {
         cardSelector = 'article, [data-testid="tweet"]';
         pattern = /\/status\/\d+/i;
-      } else if (hostname.includes('tiktok.com')) {
+      } else if (AvocadoUrls.hostMatches(hostname, 'tiktok.com')) {
         cardSelector = '[data-e2e="recommend-list-item"], [data-e2e="user-post-item-list"], div[class*="ItemContainer"], div[class*="RecommendItem"], div[class*="DivItemContainer"]';
         pattern = /(\/video\/|\/photo\/|\/v\/)\d+/i;
-      } else if (hostname.includes('facebook.com')) {
+      } else if (AvocadoUrls.hostMatches(hostname, 'facebook.com')) {
         cardSelector = '[role="article"], div[data-testid="fbfeed_story"], div[class*="userContentWrapper"]';
         pattern = /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i;
-      } else if (hostname.includes('reddit.com')) {
+      } else if (AvocadoUrls.hostMatches(hostname, 'reddit.com')) {
         cardSelector = 'shreddit-post, [data-testid="post-container"], div.Post, [role="article"]';
         pattern = /\/comments\/[a-zA-Z0-9]+/i;
-      } else if (hostname.includes('threads.net')) {
+      } else if ((AvocadoUrls.hostMatches(hostname, 'threads.net') || AvocadoUrls.hostMatches(hostname, 'threads.com'))) {
         cardSelector = 'div[data-pressable-container="true"], article, div[role="article"]';
         pattern = /\/post\/[a-zA-Z0-9_-]+/i;
-      } else if (hostname.includes('bsky.app')) {
+      } else if (AvocadoUrls.hostMatches(hostname, 'bsky.app')) {
         cardSelector = 'div[data-testid*="post-"], div[data-testid="feedItem"]';
         pattern = /\/profile\/[^/]+\/post\/[a-zA-Z0-9]+/i;
-      } else if (hostname.includes('pinterest.com')) {
+      } else if (AvocadoUrls.hostMatches(hostname, 'pinterest.com')) {
         cardSelector = 'div[data-test-id="pin"], div[data-test-id="pinWrapper"]';
         pattern = /\/pin\/\d+/i;
       }
@@ -582,52 +575,8 @@
         }
       }
 
-      // Method 2: Climb up DOM ancestors as a backup DOM check
-      let curr = videoElement;
-      while (curr && curr !== document.body) {
-        const links = curr.querySelectorAll('a');
-        for (const link of links) {
-          if (link.href && pattern.test(link.href)) {
-            if (!link.href.includes('/tagged/') && !link.href.includes('/liked/') && !link.href.includes('/sharer/')) {
-              return link.href;
-            }
-          }
-        }
-        curr = curr.parentElement;
-      }
-
-      // Method 3: Visual Layout Distance Fallback (if DOM is completely flat or obfuscated)
-      const anchors = document.querySelectorAll('a');
-      let closestLink = null;
-      let minDistance = Infinity;
-
-      const videoRect = videoElement.getBoundingClientRect();
-      const videoCenterX = videoRect.left + videoRect.width / 2;
-      const videoCenterY = videoRect.top + videoRect.height / 2;
-
-      for (const anchor of anchors) {
-        if (anchor.href && pattern.test(anchor.href)) {
-          if (anchor.href.includes('/tagged/') || anchor.href.includes('/liked/') || anchor.href.includes('/sharer/')) {
-            continue;
-          }
-          const rect = anchor.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
-
-          const anchorCenterX = rect.left + rect.width / 2;
-          const anchorCenterY = rect.top + rect.height / 2;
-
-          const dist = Math.sqrt(Math.pow(videoCenterX - anchorCenterX, 2) + Math.pow(videoCenterY - anchorCenterY, 2));
-          if (dist < minDistance) {
-            minDistance = dist;
-            closestLink = anchor.href;
-          }
-        }
-      }
-
-      if (closestLink && minDistance < 1000) {
-        console.log('AvocadoDL: Found closest link via visual distance:', closestLink, 'distance:', minDistance);
-        return closestLink;
-      }
+      // Only use the page permalink outside cards; a feed is not a video URL.
+      if (!videoElement.closest('article, [role="article"]') && isSpecificVideoUrl(href)) return href;
     } catch (e) {
       console.log('AvocadoDL: Error resolving social post URL:', e);
     }
@@ -638,40 +587,53 @@
   function getDownloadUrl(videoElement) {
     const hostname = window.location.hostname;
     const href = window.location.href;
-    
-    if (hostname.includes('instagram.com') || 
-        hostname.includes('twitter.com') || 
-        hostname.includes('x.com') || 
-        hostname.includes('tiktok.com') || 
-        hostname.includes('reddit.com') || 
-        hostname.includes('facebook.com') ||
-        hostname.includes('threads.net') ||
-        hostname.includes('bsky.app') ||
-        hostname.includes('pinterest.com')) {
+
+    if (AvocadoUrls.hostMatches(hostname, 'x.com') || AvocadoUrls.hostMatches(hostname, 'twitter.com')) {
+      const key = AvocadoTwitter.posterKey(videoElement.poster);
+      const media = key && twitterMedia.get(key);
+      if (media && Date.now() - media.timestamp < 20 * 60 * 1000) {
+        reportToBackground(media.url, 'video/mp4', 'twitter');
+        return { url: media.url, isDirect: true };
+      }
+      const direct = extractMediaSrc(videoElement);
+      if (direct && AvocadoUrls.httpUrl(direct)?.hostname === 'video.twimg.com' && !AvocadoUrls.isStream(direct)) {
+        return { url: direct, isDirect: true };
+      }
+    }
+
+    if (AvocadoUrls.hostMatches(hostname, 'instagram.com') ||
+        AvocadoUrls.hostMatches(hostname, 'twitter.com') ||
+        AvocadoUrls.hostMatches(hostname, 'x.com') ||
+        AvocadoUrls.hostMatches(hostname, 'tiktok.com') ||
+        AvocadoUrls.hostMatches(hostname, 'reddit.com') ||
+        AvocadoUrls.hostMatches(hostname, 'facebook.com') ||
+        (AvocadoUrls.hostMatches(hostname, 'threads.net') || AvocadoUrls.hostMatches(hostname, 'threads.com')) ||
+        AvocadoUrls.hostMatches(hostname, 'bsky.app') ||
+        AvocadoUrls.hostMatches(hostname, 'pinterest.com')) {
       const postUrl = findSocialPostUrl(videoElement);
       if (postUrl) {
         return { url: postUrl, isDirect: false };
       }
-      
+
       // Fallback: only allow the current page URL if it's a valid post page
-      const isPostPage = (hostname.includes('instagram.com') && /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i.test(href)) ||
-                         ((hostname.includes('twitter.com') || hostname.includes('x.com')) && /\/status\/\d+/i.test(href)) ||
-                         (hostname.includes('tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(href)) ||
-                         (hostname.includes('reddit.com') && /\/comments\//i.test(href)) ||
-                         (hostname.includes('facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(href)) ||
-                         (hostname.includes('threads.net') && /\/post\/[a-zA-Z0-9_-]+/i.test(href)) ||
-                         (hostname.includes('bsky.app') && /\/profile\/[^/]+\/post\/[a-zA-Z0-9]+/i.test(href)) ||
-                         (hostname.includes('pinterest.com') && /\/pin\/\d+/i.test(href));
-                         
-      if (isPostPage) {
-        return { url: href, isDirect: false };
-      }
-      
+      const isPostPage = (AvocadoUrls.hostMatches(hostname, 'instagram.com') && /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i.test(href)) ||
+                         ((AvocadoUrls.hostMatches(hostname, 'twitter.com') || AvocadoUrls.hostMatches(hostname, 'x.com')) && /\/status\/\d+/i.test(href)) ||
+                         (AvocadoUrls.hostMatches(hostname, 'tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(href)) ||
+                         (AvocadoUrls.hostMatches(hostname, 'reddit.com') && /\/comments\//i.test(href)) ||
+                         (AvocadoUrls.hostMatches(hostname, 'facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(href)) ||
+                         ((AvocadoUrls.hostMatches(hostname, 'threads.net') || AvocadoUrls.hostMatches(hostname, 'threads.com')) && /\/post\/[a-zA-Z0-9_-]+/i.test(href)) ||
+                         (AvocadoUrls.hostMatches(hostname, 'bsky.app') && /\/profile\/[^/]+\/post\/[a-zA-Z0-9]+/i.test(href)) ||
+                         (AvocadoUrls.hostMatches(hostname, 'pinterest.com') && /\/pin\/\d+/i.test(href));
+
+      if (isPostPage && !videoElement.closest('article, [role="article"]')) return { url: href, isDirect: false };
+      const directSrc = extractMediaSrc(videoElement);
+      if (directSrc) return { url: directSrc, isDirect: true };
+
       // Do NOT fall back to feed homepage URLs (e.g. tiktok.com/ or x.com/home)
       return null;
     }
 
-    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+    if (AvocadoUrls.hostMatches(hostname, 'youtube.com') || AvocadoUrls.hostMatches(hostname, 'youtu.be')) {
       const ytUrl = findSocialPostUrl(videoElement);
       if (ytUrl) return { url: ytUrl, isDirect: false };
       if (href.includes('/watch') || href.includes('/shorts/')) return { url: href, isDirect: false };
@@ -679,47 +641,44 @@
 
     const directSrc = extractMediaSrc(videoElement);
     if (directSrc) return { url: directSrc, isDirect: true };
-    
-    return { url: href, isDirect: false };
+
+    const pageUrl = AvocadoUrls.httpUrl(href) ? href : document.referrer;
+    return AvocadoUrls.httpUrl(pageUrl) ? { url: pageUrl, isDirect: false } : null;
   }
-  
+
   /**
    * Checks if a video element is big enough to be a real player (not a thumbnail).
    */
   function isRealVideoPlayer(videoElement) {
     const rect = videoElement.getBoundingClientRect();
     // Must be at least 50x50 pixels (covers small players, embeds, mobile frames)
-    return rect.width >= 50 && rect.height >= 50 && rect.width > 0 && rect.height > 0;
+    return rect.width >= 50 && rect.height >= (videoElement.tagName === 'AUDIO' ? 20 : 50);
   }
-  
+
   // Handle SPA navigation (YouTube, Twitter, etc.)
   let lastUrl = window.location.href;
-  
+
   function onNavigate() {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
       currentHoveredVideo = null;
+      detectedUrls.clear();
+      dismissedKeys.clear();
+      dismissedVideoElements = new WeakMap();
+      scanMedia(document);
       floatingButtonOffset = { x: 0, y: 0 };
       hideOverlayButton();
     }
   }
-  
+
   // YouTube fires this custom event on navigation
   window.addEventListener('yt-navigate-finish', onNavigate);
   window.addEventListener('popstate', onNavigate);
-  
-  // Also catch pushState/replaceState
-  const origPushState = history.pushState;
-  history.pushState = function() {
-    origPushState.apply(this, arguments);
-    setTimeout(onNavigate, 100);
-  };
-  const origReplaceState = history.replaceState;
-  history.replaceState = function() {
-    origReplaceState.apply(this, arguments);
-    setTimeout(onNavigate, 100);
-  };
-  
+
+  // The page's History API lives in a different execution world.
+  window.addEventListener('hashchange', onNavigate);
+  setInterval(() => { if (!document.hidden) onNavigate(); }, 1000);
+
   // ─── 4. Floating Download Button ────────────────────────────────────────────
   //
   // CRITICAL: We use document-level mousemove tracking instead of per-element
@@ -729,16 +688,16 @@
   //
   // Our approach: track mouse coords → check if within any <video>'s bounding
   // rect → show/hide button. This bypasses all overlay divs.
-  
+
   function createFloatingButton() {
     if (floatingBtn) return floatingBtn;
-    
+
     // Create in a shadow DOM to isolate from page styles
     const host = document.createElement('div');
     host.id = 'avocadodl-host';
-    
+
     const shadow = host.attachShadow({ mode: 'closed' });
-    
+
     const style = document.createElement('style');
     style.textContent = `
       * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -924,18 +883,18 @@
         to   { opacity: 1; }
       }
     `;
-    
+
     const bar = document.createElement('div');
     bar.className = 'avocado-dl-bar pos-top-right size-medium mode-full attached';
 
     const btn = document.createElement('button');
     btn.className = 'avocado-dl-btn';
-    btn.setAttribute('title', 'Download video (via FDM)');
+    btn.setAttribute('title', 'Download with FDM');
     btn.innerHTML = `
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
       </svg>
-      <span class="btn-label">Download video (via FDM)</span>
+      <span class="btn-label">Download with FDM</span>
     `;
 
     const divider = document.createElement('div');
@@ -955,26 +914,9 @@
       e.stopPropagation();
       e.stopImmediatePropagation();
 
-      if (currentHoveredVideo) {
-        dismissedVideoElements.add(currentHoveredVideo);
-        try {
-          const key = (currentVideoTarget && currentVideoTarget.url) || currentHoveredVideo.currentSrc || currentHoveredVideo.src || 'dismissed';
-          currentHoveredVideo.dataset.avocadoDismissedKey = key;
-          currentHoveredVideo.dataset.avocadoInitialSrc = currentHoveredVideo.currentSrc || currentHoveredVideo.src || '';
-        } catch (err) {}
-      }
-
-      if (currentVideoTarget && currentVideoTarget.url) {
-        if (isSpecificVideoUrl(currentVideoTarget.url)) {
-          dismissedKeys.add(currentVideoTarget.url);
-          saveDismissedKeys();
-        }
-      }
-
-      const directSrc = currentHoveredVideo ? (currentHoveredVideo.currentSrc || currentHoveredVideo.src) : null;
-      if (directSrc && !directSrc.startsWith('blob:') && !directSrc.startsWith('data:')) {
-        dismissedKeys.add(directSrc);
-        saveDismissedKeys();
+      if (currentHoveredVideo && currentVideoTarget) {
+        dismissedVideoElements.set(currentHoveredVideo, currentVideoTarget.url);
+        if (isSpecificVideoUrl(currentVideoTarget.url)) dismissedKeys.add(currentVideoTarget.url);
       }
 
       hideOverlayButton();
@@ -1067,8 +1009,8 @@
   // ─── Document-Level Mouse Tracking ──────────────────────────────────────────
   // Instead of mouseenter on <video> (blocked by overlay divs on social media),
   // we track mouse position and check if it's over any video's bounding rect.
-  
-  document.addEventListener('mousemove', (e) => {
+
+  function handleMouseMove(e) {
     if (isDraggingButton || isDragArmed) return;
 
     if (floatingBtn && floatingBtn.host.parentElement) {
@@ -1083,14 +1025,14 @@
       }
     }
 
-    if (mouseMoveThrottle) return;
-    mouseMoveThrottle = setTimeout(() => { mouseMoveThrottle = null; }, 66);
-    
+
     if (!showFloatingButton) return;
-    
-    const videos = document.querySelectorAll('video');
+    onNavigate();
+    for (const node of e.composedPath()) if (node.shadowRoot) watchRoot(node.shadowRoot);
+
+    const videos = getMediaElements();
     let foundVideo = null;
-    
+
     for (const video of videos) {
       if (!isRealVideoPlayer(video)) continue;
       if (minVideoDuration > 0 && video.duration > 0 && video.duration < minVideoDuration) continue;
@@ -1101,7 +1043,7 @@
         break;
       }
     }
-    
+
     if (!foundVideo && floatingBtn && floatingBtn.host.parentElement) {
       const barRect = floatingBtn.bar.getBoundingClientRect();
       const pad = 6;
@@ -1111,8 +1053,8 @@
         return;
       }
     }
-    
-    if (foundVideo && foundVideo !== currentHoveredVideo) {
+
+    if (foundVideo) {
       const downloadInfo = getDownloadUrl(foundVideo);
       if (!downloadInfo || !downloadInfo.url) {
         currentHoveredVideo = null;
@@ -1123,10 +1065,14 @@
       }
 
       if (isVideoDismissed(foundVideo, downloadInfo.url)) {
+        hideOverlayButton();
+        currentHoveredVideo = null;
         return;
       }
 
+      if (foundVideo === currentHoveredVideo && currentVideoTarget?.url === downloadInfo.url) return;
       currentHoveredVideo = foundVideo;
+      floatingButtonOffset = { x: 0, y: 0 };
       currentVideoTarget = { element: foundVideo, url: downloadInfo.url, isDirect: downloadInfo.isDirect };
       if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
       showOverlayButton(foundVideo);
@@ -1135,11 +1081,21 @@
       if (hideTimeout) clearTimeout(hideTimeout);
       hideTimeout = setTimeout(() => hideOverlayButton(), 400);
     }
+  }
+  let pendingPointer;
+  document.addEventListener('mousemove', event => {
+    const path = event.composedPath();
+    pendingPointer = { clientX: event.clientX, clientY: event.clientY, composedPath: () => path };
+    if (mouseMoveThrottle) return;
+    mouseMoveThrottle = requestAnimationFrame(() => {
+      mouseMoveThrottle = null;
+      handleMouseMove(pendingPointer);
+    });
   }, { passive: true });
-  
+
   function showOverlayButton(videoElement) {
     const { host, btn, bar, shadow } = createFloatingButton();
-    
+
     // Use fixed positioning based on video's bounding rect
     const rect = videoElement.getBoundingClientRect();
     host.style.cssText = `
@@ -1151,11 +1107,11 @@
       width: ${rect.width}px;
       height: ${rect.height}px;
     `;
-    
+
     // Remove from previous parent if any
     if (host.parentElement) host.remove();
-    document.body.appendChild(host);
-    
+    (document.fullscreenElement || document.body).appendChild(host);
+
     // Re-trigger fade-in animation
     bar.style.animation = 'none';
     bar.offsetHeight;
@@ -1166,62 +1122,47 @@
     const labelEl = btn.querySelector('.btn-label');
     if (labelEl) {
       labelEl.textContent = currentVideoTarget && !currentVideoTarget.isDirect
-        ? 'Download video (via FDM)'
-        : 'Download video';
+        ? 'Download with FDM'
+        : 'Download with FDM';
     }
-    
+
     // Click handler on main download button
     btn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      
+
       // Ignore the click that ends a drag gesture (flag auto-clears via timeout)
       if (suppressButtonClick) return;
       if (btn.classList.contains('sent')) return;
-      
+
       if (currentVideoTarget) {
         if (!isExtensionContextValid()) {
           if (labelEl) labelEl.textContent = 'Please refresh page';
           setTimeout(() => {
             if (labelEl) {
               labelEl.textContent = currentVideoTarget && !currentVideoTarget.isDirect
-                ? 'Download video (via FDM)'
-                : 'Download video';
+                ? 'Download with FDM'
+                : 'Download with FDM';
             }
           }, 2500);
           return;
         }
 
-        safeSendMessage({
-          type: 'MEDIA_FOUND',
-          url: currentVideoTarget.url,
-          mediaType: 'video/mp4',
-          source: currentVideoTarget.isDirect ? 'dom' : 'page-url',
-          pageTitle: document.title,
-          thumbnail: getPageThumbnail()
-        });
-        
-        safeSendMessage({
-          type: 'DOWNLOAD_AS',
-          url: currentVideoTarget.url
-        });
-        
-        // Visual feedback — turn blue, show checkmark, auto-dismiss
+        const freshTarget = getDownloadUrl(currentVideoTarget.element);
+        if (!freshTarget) { if (labelEl) labelEl.textContent = 'Video changed. Hover again.'; return; }
         btn.classList.add('sent');
-        if (labelEl) labelEl.textContent = '✓ Sent to FDM!';
-        setTimeout(() => {
+        if (labelEl) labelEl.textContent = 'Requesting…';
+        safeSendMessage({ type: 'DOWNLOAD_AS', ...freshTarget, pageUrl: location.href }, response => {
           btn.classList.remove('sent');
-          if (labelEl) {
-            labelEl.textContent = currentVideoTarget && !currentVideoTarget.isDirect
-              ? 'Download video (via FDM)'
-              : 'Download video';
-          }
-        }, 2000);
+          btn.title = response?.error || response?.message || 'No response. Refresh the page.';
+          if (labelEl) labelEl.textContent = response?.error ? 'Try again — see tooltip'
+            : response?.viaFdm ? 'Check FDM' : response?.ok ? 'Download started' : 'Refresh this page';
+        });
       }
     };
   }
-  
+
   function hideOverlayButton() {
     if (isDraggingButton) return;
     if (mouseIdleTimer) { clearTimeout(mouseIdleTimer); mouseIdleTimer = null; }
@@ -1230,26 +1171,30 @@
     }
     currentVideoTarget = null;
   }
-  
+
   // Update button position on scroll/resize (for fixed positioning)
   let scrollThrottle = null;
   function onScrollResize() {
     if (scrollThrottle) return;
     scrollThrottle = setTimeout(() => { scrollThrottle = null; }, 100);
-    
+
     if (currentHoveredVideo && floatingBtn && floatingBtn.host.parentElement) {
       const rect = currentHoveredVideo.getBoundingClientRect();
       floatingBtn.host.style.top = `${rect.top}px`;
       floatingBtn.host.style.left = `${rect.left}px`;
       floatingBtn.host.style.width = `${rect.width}px`;
       floatingBtn.host.style.height = `${rect.height}px`;
+      applyDragOffset();
     }
   }
-  window.addEventListener('scroll', onScrollResize, { passive: true });
+  window.addEventListener('scroll', onScrollResize, { passive: true, capture: true });
+  document.addEventListener('fullscreenchange', () => {
+    if (currentHoveredVideo && currentVideoTarget) showOverlayButton(currentHoveredVideo);
+  });
   window.addEventListener('resize', onScrollResize, { passive: true });
-  
+
   // ─── Listen for settings changes ────────────────────────────────────────────
-  
+
   if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
     chrome.storage.onChanged.addListener((changes) => {
       if (changes.settings) {
@@ -1275,9 +1220,9 @@
     try {
       const href = window.location.href;
       const hostname = window.location.hostname;
-      const videos = document.querySelectorAll('video');
+      const videos = getMediaElements();
       let bestVideo = null;
-      
+
       // Step 1: Prioritize currently playing (unpaused) video players
       for (const video of videos) {
         if (isRealVideoPlayer(video) && !video.paused) {
@@ -1285,28 +1230,28 @@
           break;
         }
       }
-      
+
       // Step 2: Fallback to largest visible viewport video
       if (!bestVideo) {
         let maxVisibleArea = 0;
         const viewportHeight = window.innerHeight;
         const viewportWidth = window.innerWidth;
-        
+
         for (const video of videos) {
           if (!isRealVideoPlayer(video)) continue;
           const rect = video.getBoundingClientRect();
-          
+
           const xOverlap = Math.max(0, Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0));
           const yOverlap = Math.max(0, Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0));
           const visibleArea = xOverlap * yOverlap;
-          
+
           if (visibleArea > maxVisibleArea) {
             maxVisibleArea = visibleArea;
             bestVideo = video;
           }
         }
       }
-      
+
       if (bestVideo) {
         const downloadInfo = getDownloadUrl(bestVideo);
         if (downloadInfo && downloadInfo.url) {
@@ -1318,14 +1263,14 @@
           };
         }
       }
-      
+
       // Fallback: only if we are on a specific post/video detail page, not a general feed
-      const isPostPage = (hostname.includes('instagram.com') && /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i.test(href)) ||
-                         ((hostname.includes('twitter.com') || hostname.includes('x.com')) && /\/status\/\d+/i.test(href)) ||
-                         (hostname.includes('tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(href)) ||
-                         (hostname.includes('reddit.com') && /\/comments\//i.test(href)) ||
-                         (hostname.includes('facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(href));
-                         
+      const isPostPage = (AvocadoUrls.hostMatches(hostname, 'instagram.com') && /(\/p\/|\/reel\/|\/reels\/)[a-zA-Z0-9_-]+/i.test(href)) ||
+                         ((AvocadoUrls.hostMatches(hostname, 'twitter.com') || AvocadoUrls.hostMatches(hostname, 'x.com')) && /\/status\/\d+/i.test(href)) ||
+                         (AvocadoUrls.hostMatches(hostname, 'tiktok.com') && /(\/video\/|\/photo\/|\/v\/)\d+/i.test(href)) ||
+                         (AvocadoUrls.hostMatches(hostname, 'reddit.com') && /\/comments\//i.test(href)) ||
+                         (AvocadoUrls.hostMatches(hostname, 'facebook.com') && /(\/videos\/|\/watch\/|\/reel\/|\/posts\/|\/permalink\.php)/i.test(href));
+
       if (isPostPage) {
         return {
           url: href,
@@ -1347,12 +1292,8 @@
         const activeVideo = getActiveVideo();
         sendResponse({ activeVideo });
       }
-      if (message.type === 'TRIGGER_FDM_FETCH') {
-        fetch(message.url, { mode: 'no-cors' }).catch(() => {});
-        sendResponse({ ok: true });
-      }
-      return true;
+
     });
   }
-  
+
 })();

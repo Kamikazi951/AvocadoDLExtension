@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AvocadoDL",
-  "version": "1.2.1",
-  "description": "Smart video download helper — detects media on any webpage with one-click download.",
+  "version": "1.3.1",
+  "description": "Detect video and audio, save direct files, and send video pages and streams to Free Download Manager.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -14,7 +14,8 @@
     "storage",
     "activeTab",
     "tabs",
-    "contextMenus"
+    "contextMenus",
+    "scripting"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -24,10 +25,32 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "twitter-media.js",
+        "injected.js"
+      ],
       "run_at": "document_start",
-      "all_frames": true
+      "all_frames": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "urls.js",
+        "twitter-media.js",
+        "content.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": true,
+      "match_origin_as_fallback": true
     }
   ],
   "action": {
@@ -37,13 +60,8 @@
       "32": "icons/icon32.png",
       "48": "icons/icon48.png"
     },
-    "default_title": "AvocadoDL — Video Downloads"
+    "default_title": "AvocadoDL - Video Downloads"
   },
-  "web_accessible_resources": [
-    {
-      "resources": ["injected.js"],
-      "matches": ["<all_urls>"]
-    }
-  ],
-  "options_page": "settings.html"
+  "options_page": "settings.html",
+  "minimum_chrome_version": "119"
 }
